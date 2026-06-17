@@ -1,0 +1,24 @@
+{
+  "server": {
+    "host": "localhost",
+    "port": 25565,
+    "version": "1.21.1",
+    "auth": "offline"
+  },
+  "bot": {
+    "username": "WoodBot",
+    "password": "",
+    "serverPassword": "password"
+  },
+  "treeRadius": 32,
+  "collectRadius": 24,
+  "replantEnabled": true,
+  "inventoryThreshold": 90,
+  "autoReconnect": true,
+  "reconnectDelay": 5000,
+  "maxReconnectAttempts": 10,
+  "stuckTimeout": 15000,
+  "harvestDelay": 300,
+  "scanInterval": 5000,
+  "apiPort": 3001
+}
