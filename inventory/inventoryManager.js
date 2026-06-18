@@ -146,11 +146,54 @@ function getInventorySummary(bot) {
 }
 
 /**
- * Get items that should be deposited into storage (everything except axes and saplings).
+ * Get items that should be deposited into storage.
+ * Keeps axes, saplings, all food items, 'scaffolding' blocks, and up to 64 wood logs/planks.
  */
 function getDepositableItems(bot) {
-  return bot.inventory.items().filter(item => !isKeepItem(item));
+  const { FOOD_ITEMS } = require('../survival/foodManager');
+  const items = bot.inventory.items();
+  const depositable = [];
+  
+  let scaffoldBlocksToKeep = 64;
+
+  for (const item of items) {
+    // 1. Keep axes
+    if (item.name.includes('axe') || (item.displayName || '').toLowerCase().includes('axe')) {
+      continue;
+    }
+    // 2. Keep saplings
+    if (SAPLING_NAMES.includes(item.name)) {
+      continue;
+    }
+    // 3. Keep food items
+    if (FOOD_ITEMS.includes(item.name)) {
+      continue;
+    }
+    // 4. Keep scaffolding block
+    if (item.name === 'scaffolding') {
+      continue;
+    }
+    // 5. Keep up to 64 wood logs/planks (scaffolding)
+    const isWoodLogOrPlank = item.name.endsWith('_log') || item.name.endsWith('_planks');
+    if (isWoodLogOrPlank) {
+      if (item.count <= scaffoldBlocksToKeep) {
+        scaffoldBlocksToKeep -= item.count;
+        continue;
+      } else {
+        const depositCount = item.count - scaffoldBlocksToKeep;
+        scaffoldBlocksToKeep = 0;
+        depositable.push({ ...item, count: depositCount });
+        continue;
+      }
+    }
+
+    // 6. Otherwise, deposit the item
+    depositable.push(item);
+  }
+
+  return depositable;
 }
+
 
 module.exports = {
   equipBestAxe,

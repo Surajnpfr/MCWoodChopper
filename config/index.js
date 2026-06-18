@@ -34,6 +34,8 @@ const config = {
   harvestDelay: defaults.harvestDelay,
   scanInterval: defaults.scanInterval,
   apiPort: parseInt(process.env.API_PORT || process.env.PORT, 10) || defaults.apiPort,
+  bedSearchRadius: parseInt(process.env.BED_SEARCH_RADIUS, 10) || 64,
+  spawnCheckInterval: parseInt(process.env.SPAWN_CHECK_INTERVAL, 10) || 5, // every N harvest cycles
 };
 
 module.exports = Object.freeze(config);

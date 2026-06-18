@@ -1,100 +1,57 @@
 const express = require('express');
+const path = require('path');
 const logger = require('../utils/logger');
-const { getInventorySummary, getInventoryFullness, countLogs, countSaplings } = require('../inventory/inventoryManager');
+const botManager = require('../botManager');
+const config = require('../config');
 
 const MODULE = 'API';
 
-/**
- * Bot statistics tracker.
- */
-const stats = {
-  treesChopped: 0,
-  logsCollected: 0,
-  saplingsPlanted: 0,
-  itemsDeposited: 0,
-  reconnects: 0,
-  startedAt: new Date().toISOString(),
-  lastActivity: null,
-  currentState: 'initializing',
-};
-
-/**
- * Start the Express monitoring API.
- *
- * @param {import('mineflayer').Bot} bot - The mineflayer bot instance (can be null initially)
- * @param {number} port - Port to listen on
- * @returns {{ app: express.Application, stats: object, updateBot: Function }}
- */
 function startAPI(port) {
   const app = express();
-  let botRef = null;
 
-  /**
-   * Update the bot reference (needed for reconnects).
-   */
-  function updateBot(bot) {
-    botRef = bot;
-  }
+  // Middleware
+  app.use(express.json());
+  
+  // Serve static UI files
+  app.use(express.static(path.join(__dirname, '../public')));
 
-  // Health check
-  app.get('/', (req, res) => {
-    res.json({
-      name: 'MC Wood Chopper Bot',
-      status: 'running',
-      uptime: process.uptime(),
-    });
+  // Bot endpoints
+  app.get('/api/bots', (req, res) => {
+    res.json(botManager.getAllStatus());
   });
 
-  // Bot status
-  app.get('/status', (req, res) => {
-    if (!botRef || !botRef.entity) {
-      return res.json({
-        online: false,
-        state: stats.currentState,
-        uptime: process.uptime(),
-      });
-    }
-
-    res.json({
-      online: true,
-      state: stats.currentState,
-      health: botRef.health,
-      food: botRef.food,
-      position: {
-        x: Math.round(botRef.entity.position.x),
-        y: Math.round(botRef.entity.position.y),
-        z: Math.round(botRef.entity.position.z),
-      },
-      uptime: process.uptime(),
-      lastActivity: stats.lastActivity,
-    });
+  app.post('/api/bots/launch', (req, res) => {
+    const { count = 1, baseName = 'WoodBot', serverIp = 'localhost', serverPassword = '' } = req.body;
+    logger.info(MODULE, `API Request: Launching ${count} bots on ${serverIp} with base name ${baseName}`);
+    const bots = botManager.launchBots(count, baseName, serverIp, serverPassword);
+    res.json({ success: true, bots });
   });
 
-  // Inventory contents
-  app.get('/inventory', (req, res) => {
-    if (!botRef) {
-      return res.json({ error: 'Bot not connected' });
-    }
-
-    res.json({
-      fullness: getInventoryFullness(botRef) + '%',
-      logs: countLogs(botRef),
-      saplings: countSaplings(botRef),
-      items: getInventorySummary(botRef),
-    });
+  app.post('/api/bots/stop/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    const success = botManager.stopBot(id);
+    res.json({ success });
   });
 
-  // Statistics
-  app.get('/stats', (req, res) => {
-    res.json(stats);
+  app.post('/api/bots/stop-all', (req, res) => {
+    botManager.stopAll();
+    res.json({ success: true });
+  });
+
+  app.get('/api/config', (req, res) => {
+    // Return safe config values (hide passwords)
+    const safeConfig = { ...config };
+    if (safeConfig.bot) safeConfig.bot.password = '***';
+    if (safeConfig.bot) safeConfig.bot.serverPassword = '***';
+    res.json(safeConfig);
   });
 
   app.listen(port, () => {
-    logger.info(MODULE, `Monitoring API started on port ${port}`);
-    logger.info(MODULE, `Endpoints: /status, /inventory, /stats`);
+    logger.info(MODULE, `Web UI and API started on port ${port}`);
+    logger.info(MODULE, `Dashboard available at http://localhost:${port}`);
   });
 
-  return { app, stats, updateBot };
+  return app;
 }
 
 module.exports = {

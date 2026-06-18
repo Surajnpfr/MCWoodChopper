@@ -10,70 +10,75 @@ const MODULE = 'Navigator';
 async function goTo(bot, position, timeout) {
   const stuckTimeout = timeout || 15000;
 
-  return new Promise((resolve, reject) => {
-    const mcData = require('minecraft-data')(bot.version);
-    const movements = new Movements(bot, mcData);
-
-    // Safety: avoid dangerous blocks
-    movements.allowSprinting = true;
-    movements.canDig = true;
-    movements.allow1by1towers = true;
-    movements.scafoldingBlocks = [];
-    movements.maxDropDown = 4;
-
-    bot.pathfinder.setMovements(movements);
-
-    const goal = new goals.GoalNear(position.x, position.y, position.z, 2);
-
-    let stuckTimer = null;
-    let lastPos = bot.entity.position.clone();
-    let completed = false;
-
-    const cleanup = () => {
-      if (stuckTimer) clearInterval(stuckTimer);
-      completed = true;
-    };
-
-    // Stuck detection: check every 3s if bot has moved
-    stuckTimer = setInterval(() => {
-      if (completed) return clearInterval(stuckTimer);
-
-      const currentPos = bot.entity.position;
-      const dist = currentPos.distanceTo(lastPos);
-
-      if (dist < 0.5) {
-        logger.warn(MODULE, `Bot appears stuck at ${currentPos.toString()}, cancelling navigation`);
-        cleanup();
+  return new Promise((resolve) => {
+    try {
+      if (bot.pathfinder.isMoving()) {
         bot.pathfinder.stop();
-        resolve(false); // Indicate failure but don't throw
       }
 
-      lastPos = currentPos.clone();
-    }, 3000);
+      const mcData = require('minecraft-data')(bot.version);
+      const movements = new Movements(bot, mcData);
 
-    // Timeout failsafe
-    const timeoutTimer = setTimeout(() => {
-      if (!completed) {
-        logger.warn(MODULE, `Navigation timed out after ${stuckTimeout}ms`);
-        cleanup();
-        bot.pathfinder.stop();
-        resolve(false);
-      }
-    }, stuckTimeout);
+      movements.allowSprinting = true;
+      movements.canDig = true;
+      movements.allow1by1towers = true;
+      movements.scafoldingBlocks = [];
+      movements.maxDropDown = 4;
 
-    bot.pathfinder.goto(goal)
-      .then(() => {
-        clearTimeout(timeoutTimer);
-        cleanup();
-        logger.debug(MODULE, `Reached target at ${position.toString()}`);
-        resolve(true);
-      })
-      .catch((err) => {
-        clearTimeout(timeoutTimer);
-        cleanup();
-        logger.warn(MODULE, `Navigation failed: ${err.message}`);
-        resolve(false);
-      });
+      bot.pathfinder.setMovements(movements);
+
+      // GoalGetToBlock gets the bot adjacent to the block
+      const goal = new goals.GoalGetToBlock(position.x, position.y, position.z);
+
+      let stuckTimer = null;
+      let lastPos = bot.entity.position.clone();
+      let completed = false;
+
+      const cleanup = () => {
+        if (stuckTimer) clearInterval(stuckTimer);
+        completed = true;
+      };
+
+      stuckTimer = setInterval(() => {
+        if (completed) return clearInterval(stuckTimer);
+        const currentPos = bot.entity.position;
+        if (currentPos.distanceTo(lastPos) < 0.5) {
+          logger.warn(MODULE, `Bot appears stuck, cancelling navigation`);
+          cleanup();
+          bot.pathfinder.stop();
+          resolve(false);
+        }
+        lastPos = currentPos.clone();
+      }, 4000);
+
+      const timeoutTimer = setTimeout(() => {
+        if (!completed) {
+          logger.warn(MODULE, `Navigation timed out`);
+          cleanup();
+          bot.pathfinder.stop();
+          resolve(false);
+        }
+      }, stuckTimeout);
+
+      bot.pathfinder.goto(goal)
+        .then(() => {
+          clearTimeout(timeoutTimer);
+          cleanup();
+          resolve(true);
+        })
+        .catch((err) => {
+          clearTimeout(timeoutTimer);
+          cleanup();
+          // Ignore the 'goal was changed' error as it just means we interrupted it intentionally
+          if (err.message !== 'The goal was changed before it could be completed!') {
+            logger.warn(MODULE, `Navigation failed: ${err.message}`);
+          }
+          resolve(false);
+        });
+    } catch (err) {
+      logger.error(MODULE, `GoTo error: ${err.message}`);
+      resolve(false);
+    }
   });
 }
 
@@ -81,8 +86,10 @@ async function goTo(bot, position, timeout) {
  * Move bot to within reach distance of a block position.
  */
 async function goToBlock(bot, blockPos) {
+  // Use the unified goTo logic (which employs GoalGetToBlock) to approach the block
   return goTo(bot, blockPos, 20000);
 }
+
 
 module.exports = {
   goTo,

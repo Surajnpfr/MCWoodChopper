@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCWoodChopper Dashboard</title>
+    <meta name="description" content="Dashboard for managing autonomous Minecraft wood chopper bots.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-animation"></div>
+    
+    <main class="container">
+        <header class="header">
+            <h1>MCWoodChopper <span class="badge">PRO</span></h1>
+            <p>Autonomous Fleet Manager</p>
+        </header>
+
+        <section class="control-panel glass-panel">
+            <h2>Deployment Configuration</h2>
+            <form id="launch-form">
+                <div class="form-group">
+                    <label for="serverIp">Server IP & Port</label>
+                    <input type="text" id="serverIp" placeholder="e.g. localhost:25565" required>
+                </div>
+                <div class="form-group">
+                    <label for="baseName">Bot Base Name</label>
+                    <input type="text" id="baseName" placeholder="e.g. Lumberjack" required>
+                </div>
+                <div class="form-group">
+                    <label for="botCount">Number of Bots</label>
+                    <input type="number" id="botCount" min="1" max="20" value="1" required>
+                </div>
+                <div class="form-group">
+                    <label for="serverPassword">Server Password (Optional)</label>
+                    <input type="password" id="serverPassword" placeholder="/login or /register pass">
+                </div>
+                <button type="submit" class="btn btn-primary" id="launch-btn">Deploy Fleet</button>
+                <button type="button" class="btn btn-danger" id="stop-all-btn">Stop All</button>
+            </form>
+        </section>
+
+        <section class="bots-dashboard">
+            <h2>Active Fleet <span id="active-count" class="badge">0</span></h2>
+            <div id="bots-grid" class="bots-grid">
+                <!-- Bot cards will be injected here via JS -->
+            </div>
+        </section>
+    </main>
+
+    <template id="bot-card-template">
+        <div class="bot-card glass-panel">
+            <div class="bot-header">
+                <h3 class="bot-name"></h3>
+                <span class="status-indicator"></span>
+            </div>
+            <div class="bot-stats">
+                <div class="stat-row">
+                    <span>State</span>
+                    <span class="bot-state highlight"></span>
+                </div>
+                <div class="stat-row">
+                    <span>Health</span>
+                    <div class="progress-bar"><div class="progress bot-health"></div></div>
+                </div>
+                <div class="stat-row">
+                    <span>Food</span>
+                    <div class="progress-bar food"><div class="progress bot-food"></div></div>
+                </div>
+                <div class="stat-row">
+                    <span>Inventory</span>
+                    <div class="progress-bar inv"><div class="progress bot-inv"></div></div>
+                </div>
+                <div class="stat-row">
+                    <span>Axe</span>
+                    <span class="bot-axe"></span>
+                </div>
+                <div class="stat-row">
+                    <span>Logs Chopped</span>
+                    <span class="bot-logs">0</span>
+                </div>
+                <div class="stat-row">
+                    <span>Trees Chopped</span>
+                    <span class="bot-trees">0</span>
+                </div>
+            </div>
+            <div class="bot-actions">
+                <button class="btn btn-small btn-danger stop-bot-btn">Stop Bot</button>
+            </div>
+        </div>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+</html>

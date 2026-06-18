@@ -1,6 +1,7 @@
 const { Vec3 } = require('vec3');
 const logger = require('../utils/logger');
 const { getSaplingForLog, isPlantableGround, SAPLING_NAMES } = require('../utils/blockHelper');
+const { goTo } = require('../navigation/navigator');
 
 const MODULE = 'Planter';
 
@@ -37,9 +38,16 @@ async function replantSapling(bot, position, logType) {
 
 /**
  * Place a sapling at the given position.
+ * Navigates to the position first to ensure the bot is within reach.
  */
 async function plantAt(bot, position, saplingItem) {
   try {
+    // Navigate to the planting position first (fixes "blockUpdate did not fire" timeout)
+    const dist = bot.entity.position.distanceTo(position);
+    if (dist > 3) {
+      await goTo(bot, position, 10000);
+    }
+
     // Check ground block below the tree base
     const groundPos = position.offset(0, -1, 0);
     const groundBlock = bot.blockAt(groundPos);
@@ -59,7 +67,7 @@ async function plantAt(bot, position, saplingItem) {
     // Equip the sapling
     await bot.equip(saplingItem, 'hand');
 
-    // Place sapling on the ground block
+    // Place sapling on the ground block (re-fetch to ensure fresh reference)
     const groundBlockRef = bot.blockAt(groundPos);
     if (!groundBlockRef) return false;
 

@@ -1,25 +1,31 @@
 const { Vec3 } = require('vec3');
 const logger = require('../utils/logger');
-const { goToBlock } = require('../navigation/navigator');
+const { goToBlock, goTo } = require('../navigation/navigator');
 const { equipBestAxe } = require('../inventory/inventoryManager');
 const { isLogBlock } = require('../utils/blockHelper');
 
 const MODULE = 'Harvester';
 
 // Blocks the bot can use as scaffolding to pillar up
+// Using logs because the bot has an axe — breaks them instantly and recovers them
 const SCAFFOLD_BLOCKS = [
+  'scaffolding',
   'oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log',
   'mangrove_log', 'cherry_log',
-  'dirt', 'cobblestone', 'netherrack', 'cobbled_deepslate',
-  'stone', 'granite', 'diorite', 'andesite', 'sand', 'gravel',
+  'oak_planks', 'birch_planks', 'spruce_planks', 'jungle_planks',
+  'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks',
+  'dirt', 'cobblestone', // fallback only
 ];
 
 /**
  * Chop an entire tree given its detected log positions.
- * Strategy:
- * 1. Navigate to tree base
- * 2. Chop trunk bottom-to-top by pillaring up alongside the tree
- * 3. Break scaffold blocks on the way down
+ *
+ * Strategy (redesigned for reliability):
+ *   1. Navigate to the tree base
+ *   2. Chop ALL logs bottom-to-top. For each log:
+ *      a. If the bot can dig it from its current position, dig it.
+ *      b. If not, walk underneath/beside the log and pillar up until it's in range.
+ *   3. Break scaffold blocks on the way down.
  *
  * @param {import('mineflayer').Bot} bot
  * @param {{ position: Vec3, logType: string, logs: Vec3[] }} tree
@@ -39,6 +45,9 @@ async function chopTree(bot, tree) {
     logger.warn(MODULE, 'Could not reach tree base, trying anyway...');
   }
 
+  // Clear surrounding litter at the tree base
+  await clearLitter(bot);
+
   // Sort logs: bottom-to-top, trunk first (closest to tree base x,z)
   const sorted = [...logs].sort((a, b) => {
     if (a.y !== b.y) return a.y - b.y;
@@ -50,108 +59,109 @@ async function chopTree(bot, tree) {
   let chopped = 0;
   const scaffoldPositions = []; // Track placed scaffolding to break later
 
-  // ── Phase 1: Chop all reachable logs from ground ───────────────────────
-  const unreachable = [];
-
   for (const logPos of sorted) {
-    try {
-      const block = bot.blockAt(logPos);
-      if (!block || block.name !== logType) continue;
+    // Re-check block: it may have been broken already (gravity / earlier pass)
+    const block = bot.blockAt(logPos);
+    if (!block || block.name !== logType) continue;
 
-      if (bot.canDigBlock(block) && bot.entity.position.distanceTo(logPos) <= 5) {
-        await bot.dig(block);
-        chopped++;
-        logger.debug(MODULE, `Chopped log ${chopped}/${sorted.length} at ${logPos.toString()}`);
-        await sleep(50);
-      } else {
-        unreachable.push(logPos);
-      }
-    } catch (err) {
-      unreachable.push(logPos);
+    // Attempt 1: Try to dig from current position
+    let dug = await tryDig(bot, block, logPos);
+    if (dug) {
+      chopped++;
+      await sleep(50);
+      continue;
     }
-  }
 
-  // ── Phase 2: Pillar up to chop remaining high logs ─────────────────────
-  if (unreachable.length > 0) {
-    logger.info(MODULE, `${unreachable.length} logs above reach — pillaring up...`);
+    // Attempt 2: Walk directly under/beside the log, then try again
+    const approachPos = new Vec3(logPos.x, position.y, logPos.z);
+    await goTo(bot, approachPos, 10000);
+    await equipBestAxe(bot);
 
-    // Find a scaffold position next to the trunk (offset by 1 block)
-    const scaffoldX = position.x;
-    const scaffoldZ = position.z;
-    const baseY = position.y;
+    // Re-fetch block (might have changed)
+    const block2 = bot.blockAt(logPos);
+    if (!block2 || block2.name !== logType) continue;
 
-    // Find the highest unreachable log
-    const maxY = Math.max(...unreachable.map(l => l.y));
+    dug = await tryDig(bot, block2, logPos);
+    if (dug) {
+      chopped++;
+      await sleep(50);
+      continue;
+    }
 
-    // Pillar up from tree base to max height
-    let currentPillarY = baseY;
+    // Attempt 3: Pillar up until the log is within reach (max 10 blocks up)
+    const pillarStart = bot.entity.position.clone();
+    let pillarSuccess = false;
 
-    // Move next to the trunk
-    const pillarBase = new Vec3(scaffoldX, baseY, scaffoldZ);
-    await goToBlock(bot, pillarBase);
-
-    while (currentPillarY <= maxY) {
-      // Re-equip axe (pillaring switches held item to scaffold block)
-      await equipBestAxe(bot);
-
-      // Try to dig any logs in reach at this height
-      for (let i = unreachable.length - 1; i >= 0; i--) {
-        const logPos = unreachable[i];
-        try {
-          const block = bot.blockAt(logPos);
-          if (!block || block.name !== logType) {
-            unreachable.splice(i, 1);
-            continue;
-          }
-
-          const dist = bot.entity.position.distanceTo(logPos);
-          if (dist <= 5 && bot.canDigBlock(block)) {
-            await bot.dig(block);
-            chopped++;
-            unreachable.splice(i, 1);
-            logger.debug(MODULE, `Chopped high log ${chopped}/${sorted.length} at ${logPos.toString()}`);
-            await sleep(50);
-          }
-        } catch {
-          // Will try again from higher position
-        }
-      }
-
-      if (unreachable.length === 0) break;
-
-      // Pillar up: jump and place block underneath
-      const jumped = await pillarUp(bot, scaffoldPositions);
-      if (!jumped) {
-        logger.warn(MODULE, 'Cannot pillar up further (no scaffold blocks or failed)');
+    for (let p = 0; p < 10; p++) {
+      // Re-check if the log still exists before each pillar step
+      const blockCheck = bot.blockAt(logPos);
+      if (!blockCheck || blockCheck.name !== logType) {
+        pillarSuccess = true; // log is already gone
         break;
       }
 
-      currentPillarY = Math.floor(bot.entity.position.y);
-      await sleep(100);
+      // Try to dig from current height
+      const dist = bot.entity.position.distanceTo(logPos);
+      if (dist <= 5) {
+        await equipBestAxe(bot);
+        dug = await tryDig(bot, blockCheck, logPos);
+        if (dug) {
+          chopped++;
+          pillarSuccess = true;
+          break;
+        }
+      }
+
+      // Pillar up one block
+      const jumped = await pillarUp(bot, scaffoldPositions);
+      if (!jumped) {
+        logger.warn(MODULE, `Cannot pillar up further at height ${p + 1}`);
+        break;
+      }
+      await sleep(150);
     }
 
-    // Final sweep at max height
-    await equipBestAxe(bot);
-    for (const logPos of unreachable) {
-      try {
-        const block = bot.blockAt(logPos);
-        if (!block || block.name !== logType) continue;
-        if (bot.canDigBlock(block) && bot.entity.position.distanceTo(logPos) <= 5) {
-          await bot.dig(block);
-          chopped++;
-          await sleep(50);
-        }
-      } catch {
-        // Skip
+    // If we still have unreached logs but pillared up, try one final dig
+    if (!pillarSuccess) {
+      const blockFinal = bot.blockAt(logPos);
+      if (blockFinal && blockFinal.name === logType) {
+        await equipBestAxe(bot);
+        dug = await tryDig(bot, blockFinal, logPos);
+        if (dug) chopped++;
       }
     }
 
-    // ── Phase 3: Break scaffold and come down ────────────────────────────
-    await breakScaffold(bot, scaffoldPositions);
+    await sleep(50);
   }
+
+  // ── Break scaffold and come down ──────────────────────────────────────
+  await breakScaffold(bot, scaffoldPositions);
+
+  // Collect any items that landed on the ground
+  await sleep(500);
 
   logger.info(MODULE, `Finished chopping tree: ${chopped}/${logs.length} logs harvested`);
   return chopped;
+}
+
+/**
+ * Attempt to dig a block. Returns true if successful.
+ * Handles all error cases gracefully.
+ */
+async function tryDig(bot, block, logPos) {
+  try {
+    if (!block || block.name === 'air') return false;
+    const dist = bot.entity.position.distanceTo(logPos);
+    // Minecraft max interact distance is about 4.5 blocks; be generous
+    if (dist > 5) return false;
+    if (!bot.canDigBlock(block)) return false;
+    await bot.dig(block);
+    logger.debug(MODULE, `Chopped log at ${logPos.toString()}`);
+    return true;
+  } catch (err) {
+    logger.debug(MODULE, `tryDig failed at ${logPos.toString()}: ${err.message}`);
+    return false;
+  }
 }
 
 // Non-solid blocks that prevent placement (ground litter)
@@ -172,12 +182,10 @@ const LITTER_BLOCKS = [
 ];
 
 /**
- * Clear litter blocks (flowers, grass, saplings, leaves, etc.) around the bot's position.
+ * Clear litter blocks around the bot's current position.
  */
 async function clearLitter(bot) {
   const botPos = bot.entity.position.floored();
-
-  // Check a 3x3 area around the bot at foot level and up to 3 blocks high (to clear full head space for jumping)
   for (let dx = -1; dx <= 1; dx++) {
     for (let dz = -1; dz <= 1; dz++) {
       for (let dy = 0; dy <= 3; dy++) {
@@ -187,7 +195,6 @@ async function clearLitter(bot) {
           try {
             if (bot.canDigBlock(block)) {
               await bot.dig(block);
-              logger.debug(MODULE, `Cleared ${block.name} at ${pos.toString()}`);
             }
           } catch {
             // Ignore — not critical
@@ -200,12 +207,10 @@ async function clearLitter(bot) {
 
 /**
  * Jump and place a block underneath to pillar up one block.
- * Returns true if successful.
+ * Precise version: uses target ground block tracking, jump release, and height verification.
+ * Returns true if the bot is now 1 block higher.
  */
 async function pillarUp(bot, scaffoldPositions) {
-  // Clear any litter that would prevent placement
-  await clearLitter(bot);
-
   // Find a scaffold block in inventory
   const scaffoldItem = bot.inventory.items().find(item =>
     SCAFFOLD_BLOCKS.includes(item.name)
@@ -216,31 +221,52 @@ async function pillarUp(bot, scaffoldPositions) {
     return false;
   }
 
+  const startY = bot.entity.position.y;
+  const groundBlockPos = bot.entity.position.offset(0, -1, 0).floored();
+  const groundBlock = bot.blockAt(groundBlockPos);
+
+  if (!groundBlock || groundBlock.name === 'air' || groundBlock.name === 'cave_air') {
+    logger.debug(MODULE, 'No solid ground block under feet to place against');
+    return false;
+  }
+
   try {
-    // Equip the scaffold block
+    // Step 1: Equip the scaffold block
     await bot.equip(scaffoldItem, 'hand');
 
-    // Jump
+    // Step 2: Look straight down
+    await bot.look(0, -Math.PI / 2, true);
+
+    // Step 3: Trigger jump
     bot.setControlState('jump', true);
-    await sleep(350); // Wait until near peak of jump
 
-    // Place block below feet
-    const belowPos = bot.entity.position.offset(0, -1, 0).floored();
-    const blockBelow = bot.blockAt(belowPos);
-
-    // We need to place on a reference block — the block below where we want to place
-    const refPos = belowPos.offset(0, -1, 0);
-    const refBlock = bot.blockAt(refPos);
-
-    if (refBlock && refBlock.name !== 'air') {
-      await bot.placeBlock(refBlock, new Vec3(0, 1, 0));
-      scaffoldPositions.push(belowPos.clone());
-      logger.debug(MODULE, `Placed scaffold at ${belowPos.toString()}`);
+    // Wait until we have jumped high enough (apex is usually around 1.25m, wait until > 0.8m)
+    let waited = 0;
+    while (bot.entity.position.y - startY < 0.8 && waited < 500) {
+      await sleep(50);
+      waited += 50;
     }
 
+    // Release jump immediately so we don't double jump
     bot.setControlState('jump', false);
-    await sleep(200);
 
+    // Step 4: Place block on top of ground block
+    await bot.placeBlock(groundBlock, new Vec3(0, 1, 0));
+    const placedPos = groundBlockPos.offset(0, 1, 0);
+    scaffoldPositions.push(placedPos);
+    logger.debug(MODULE, `Placed scaffold at ${placedPos.toString()}`);
+
+    // Step 5: Wait to land
+    await sleep(300);
+
+    // Step 6: Verify height increase
+    const endY = bot.entity.position.y;
+    if (endY - startY < 0.5) {
+      logger.debug(MODULE, `Pillar failed: only moved ${(endY - startY).toFixed(2)} blocks up`);
+      return false;
+    }
+
+    logger.debug(MODULE, `Pillared up to Y=${Math.floor(endY)} (from Y=${Math.floor(startY)})`);
     return true;
   } catch (err) {
     bot.setControlState('jump', false);
@@ -256,6 +282,9 @@ async function breakScaffold(bot, scaffoldPositions) {
   if (scaffoldPositions.length === 0) return;
 
   logger.debug(MODULE, `Breaking ${scaffoldPositions.length} scaffold blocks...`);
+
+  // Re-equip axe/pickaxe for faster breaking
+  await equipBestAxe(bot);
 
   // Break from top to bottom (reverse order — we placed bottom to top)
   for (let i = scaffoldPositions.length - 1; i >= 0; i--) {
