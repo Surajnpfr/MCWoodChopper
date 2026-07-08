@@ -63,11 +63,11 @@ Here are a few ways you can contribute:
 * 🧑‍💻 **Code:** Submit Pull Requests! We love reviewing and merging community code.
 
 ### How to contribute:
-1. Fork the repo! 🍴
+1. Fork the repo! 
 2. Create your feature branch: `git checkout -b feature/AmazingFeature`
 3. Commit your changes: `git commit -m 'Add some AmazingFeature'`
 4. Push to the branch: `git push origin feature/AmazingFeature`
-5. Open a Pull Request! 🎈
+5. Open a Pull Request! 
 
 We maintain a friendly, inclusive, and welcoming environment. Don't hesitate to ask questions if you're stuck or new to open source. Let's build the ultimate Minecraft automation together! 🌍💚
 
