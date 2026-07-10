@@ -1,4 +1,4 @@
-# 🌲 MCWoodChopper
+#  MCWoodChopper
 
 > **An Autonomous Minecraft Wood Chopper & Tree Planter Bot!** 🪓🌳
 
